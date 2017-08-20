@@ -1,0 +1,30 @@
+##################################################
+#         Calculate counts per gene              #
+##################################################
+
+# counts per detectable gene in dds object from DESeq2
+countsMHrows<- counts(ddsMH)
+countsMHrows<- rowSums(countsMHrows)
+countsMHsyn<- match(finalsyntenyNEW$V2, names(countsMHrows))
+countsMHsyn<- countsMHrows[countsMHsyn]
+
+countsZSAll<- counts(ddsZS)
+countsZSAllrows<- rowSums(countsZSAll)
+countsZSsyn<- match(finalsyntenyNEW$V7, names(countsZSAllrows))
+countsZSsyn<- countsZSAllrows[countsZSsyn]
+
+countsMSUrows<- counts(ddsMSU)
+countsMSUrows<- rowSums(countsMSUrows)
+countsMSUsyn<- match(finalsyntenyNEW$V3, names(countsMSUrows))
+countsMSUsyn<- countsMSUrows[countsMSUsyn]
+
+countsmat<- matrix(data = countsMHsyn, ncol = 3, nrow = 21145)
+countsmat[,2]<- countsZSsyn
+countsmat[,3]<- countsMSUsyn
+row.names(countsmat)<- names(countsMSUsyn)
+j<- which(is.na(countsmat))
+countsmat_no_na<- countsmat[-j]
+nacount<- which(apply(countsmat_no_na, 1, function(x) any(is.na(x)))
+naAll<- union(nacount, exonicSNPs)
+nacount<- countsmat_no_na[-naAll,]
+
