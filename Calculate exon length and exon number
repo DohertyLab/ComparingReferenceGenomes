@@ -1,0 +1,116 @@
+#########################################################
+#       Calculate exon length and exon number           #
+#########################################################
+
+MH63gtf_tx<- ParseGFF(filenm = "~/Indica_genome_files/FinalGTF_MH.gtf") #change to 5 for transcript_id in AccNms<-sapply(strsplit(x = nms, split = "\\ |\\;"),function(x) x[5])
+MH63exons<- GetChromLocs(tGFF = MH63gtf_tx, GeneFeat = "exon")
+ZS97gtf_tx<- ParseGFF(filenm = "~/Indica_genome_files/FinalGTF_ZS.gtf")
+ZS97exons<- GetChromLocs(tGFF = ZS97gtf_tx, GeneFeat = "exon")
+MSUgtf_tx<- ParseGFF(filenm = "~/Japonica_genome_files/MSU/FinalGTFMSU_no_na.gtf")
+MSUexons<- GetChromLocs(tGFF = MSUgtf_tx, GeneFeat = "exon")
+
+# for MH63
+exonlength<- abs(MH63exons$V5-MH63exons$V4)
+exonlist<- tapply(exonlength,INDEX = MH63exons[,9], function(x) x)
+geneidvec<- MH63newgtf$V9
+
+exonsums<- lapply(geneidvec, function(x) exonlist[grep(pattern = x, names(exonlist))])
+names(exonsums)<- geneidvec
+exonsum2<- lapply(exonsums, function(x) lapply(x, function(y) sum(y)))
+
+exonunlist<- unlist(exonsum2)
+exonunlist<- sapply(geneidvec, function(x) exonunlist[grep(pattern = x, names(exonunlist))])
+exonmax<- lapply(exonunlist, function(x) max(x))
+MH63exonlength<- as.matrix(exonmax)
+colnames(MH63exonlength)<- c("exon_length")
+
+a<- sapply(exonsums, function(x) sapply(x, function(y) length(y)))
+MHexonnumber<- sapply(a, function(x) max(x))
+
+# for ZS97
+exonlength<- abs(ZS97exons$V5-ZS97exons$V4)
+exonlist<- tapply(exonlength,INDEX = ZS97exons[,9], function(x) x)
+geneidvec<- ZS97newgtf$V9
+
+exonsums<- lapply(geneidvec, function(x) exonlist[grep(pattern = x, names(exonlist))])
+names(exonsums)<- geneidvec
+exonsum2<- lapply(exonsums, function(x) lapply(x, function(y) sum(y)))
+
+exonunlist<- unlist(exonsum2)
+exonunlist<- sapply(geneidvec, function(x) exonunlist[grep(pattern = x, names(exonunlist))])
+exonmax<- lapply(exonunlist, function(x) max(x))
+ZS97exonlength<- as.matrix(exonmax)
+colnames(ZS97exonlength)<- c("exon_length")
+
+# for MSU
+exonlength<- abs(MSUexons$V5-MSUexons$V4)
+exonlist<- tapply(exonlength,INDEX = MSUexons[,9], function(x) x)
+geneidvec<- MSUnewgtf$V9
+
+exonsums<- lapply(geneidvec, function(x) exonlist[grep(pattern = x, names(exonlist))])
+names(exonsums)<- geneidvec
+exonsum2<- lapply(exonsums, function(x) lapply(x, function(y) sum(y)))
+
+exonunlist<- unlist(exonsum2)
+exonunlist<- lapply(geneidvec, function(x) exonunlist[grep(pattern = x, names(exonunlist))])
+exonmax<- lapply(exonunlist, function(x) max(x))
+MSUexonlength2<- as.matrix(exonmax)
+colnames(MSUexonlength)<- c("exon_length")
+
+a<- sapply(exonsums, function(x) sapply(x, function(y) length(y)))
+MSUexonnumber<- sapply(a, function(x) max(x))
+
+# assemble exonlength matrix
+a<- sapply(MH63exonlength, function(x) sapply(x, function(y) y))
+a<- unlist(a)
+a<- as.matrix(a)
+test<-matrix(nrow = 57174, ncol=1)
+test[,1]<-a
+row.names(test)<- MH63genes$V9
+b<- match(x = finalsyntenyNEW$V2, table = row.names(test))
+MH63exonsyn<- test[b,]
+MH63exonsyn<- as.matrix(MH63exonsyn)
+
+a<- sapply(ZS97exonlength, function(x) sapply(x, function(y) y))
+a<- unlist(a)
+a<- as.matrix(a)
+test<-matrix(nrow = 54831, ncol=1)
+test[,1]<-a
+row.names(test)<- ZS97genes$V9
+b<- match(x = finalsyntenyNEW$V7, table = row.names(test))
+ZS97exonsyn<- test[b,]
+ZS97exonsyn<- as.matrix(ZS97exonsyn)
+
+a<- sapply(MSUexonlength, function(x) sapply(x, function(y) y))
+a<- unlist(a)
+a<- as.matrix(a)
+test<-matrix(nrow = 55801, ncol=1)
+test[,1]<-a
+row.names(test)<- MSUgenes$V9
+b<- match(x = finalsyntenyNEW$V3, table = row.names(test))
+MSUexonsyn<- test[b,]
+MSUexonsyn<- as.matrix(MSUexonsyn)
+
+exonlength<- matrix(ncol = 3, nrow = 21145)
+exonlength[,1]<- MH63exonsyn[,1]
+exonlength[,2]<- ZS97exonsyn[,1]
+exonlength[,3]<- MSUexonsyn[,1]
+row.names(exonlength)<- row.names(MSUexonsyn) 
+colnames(exonlength)<- c("MH63", "ZS97", "MSU")
+
+# syntenic genes
+exonlengthsubset<- intersect(row.names(nacount), row.names(exonlength))
+exonlengthsubset<- exonlength[exonlengthsubset,]
+
+# assemble exonnumber matrix
+MSUexonnumbersyn<- intersect(finalsyntenyNEW$V3, names(MSUexonnumber))
+MSUexonnumbersyn<- MSUexonnumber[MSUexonnumbersyn]
+MHexonnumbersyn<- intersect(finalsyntenyNEW$V2, names(MHexonnumber))
+MHexonnumbersyn<- MHexonnumber[MHexonnumbersyn]
+
+MHMSUexonnumber<- matrix(nrow=21145, ncol=2)
+MHMSUexonnumber[,1]<- MHexonnumbersyn
+MHMSUexonnumber[,2]<- MSUexonnumbersyn
+row.names(MHMSUexonnumber)<- names(MSUexonnumbersyn)
+colnames(MHMSUexonnumber)<- c("MH_exon", "MSU_exon")
+
