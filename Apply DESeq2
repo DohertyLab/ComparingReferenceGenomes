@@ -1,0 +1,205 @@
+###############################################
+#                 DESeq2                      #
+###############################################
+# use DESeq2 vingette and http://www.bioconductor.org/help/workflows/rnaseqGene/ as resources
+
+library("GenomicAlignments")
+library("DESeq2")
+library("Rsamtools")
+library("GenomicFeatures")
+library("BiocParallel")
+
+# generate SummarizedExperiment object to feed into DESeq2 package
+# generate SampleTable
+sampleTable = data.frame(
+  row.names = c( "ZS_Dawn_C.1", "ZS_Dawn_C.2", "ZS_Dawn_C.3",
+                 "ZS_Dawn_C.4", "ZS_Dusk_C.1", "ZS_Dusk_C.2", "ZS_Dusk_C.3", "ZS_Dusk_C.4" ),
+  condition = c(rep("Dawn",4), rep("Dusk", 4)),
+  samples = c( "ZS_Dawn_C.1", "ZS_Dawn_C.2", "ZS_Dawn_C.3",
+               "ZS_Dawn_C.4", "ZS_Dusk_C.1", "ZS_Dusk_C.2", "ZS_Dusk_C.3", "ZS_Dusk_C.4"  ))
+
+# generate path to bam files
+filenames <- file.path("~/ZS_BAM", paste0(sampleTable$samples, ".bam"))
+file.exists(filenames)
+
+# provides an R interface to BAM files
+bamfiles <- BamFileList(filenames)
+
+# load gtf file
+gtffile <- file.path("/storage/data_1/erins/Indica_genome_files","FinalGTF_ZS.gtf")
+txdb <- makeTxDbFromGFF(gtffile, format="gtf", circ_seqs=character())
+
+# produces a GRangesList of all the exons grouped by gene (Lawrence et al. 2013). Each element of the list is a GRanges object of the exons for a gene.
+ebg <- exonsBy(txdb, by="gene")
+
+# create the SummarizedExperiment object with counts
+se <- summarizeOverlaps(features=ebg, reads=bamfiles,
+                        mode="Union",
+                        singleEnd=TRUE,
+                        ignore.strand=TRUE)
+
+colData(se) <- DataFrame(sampleTable)
+
+# check the millions of fragments that uniquely aligned to the genes (the second argument of round tells how many decimal points to keep)
+round( colSums(assay(se)) / 1e6, 1 )
+
+# DESeq2
+dds <- DESeqDataSet(se, design = ~ condition)
+
+# remove the rows that have no or nearly no information about the amount of gene expression (additional filtering is performed later)
+nrow(dds)
+dds <- dds[ rowSums(counts(dds)) > 1, ]
+nrow(dds)
+
+# differential expression analysis
+dds <- DESeq(dds)
+
+# build results table
+res <- results(dds)
+
+# adjust FDR and LFC threshold
+res.05LFC1 <- results(dds, lfcThreshold=1, alpha=.05)
+sum(res.05$padj < 0.05, na.rm=TRUE)
+
+# subset results table
+res.05Sig <- subset(res.05, padj < 0.05)
+
+# extract gene names
+DEGenes.05<- row.names(res.05Sig)
+
+# ggplot
+geneCounts <- plotCounts(ddsMSU, gene="LOC_Os03g61160", intgroup=c("condition"), returnData=TRUE)
+ggplot(geneCounts, aes(x=condition, y=count, color=condition)) +
+  # scale_y_log10(breaks=c(0,10,100,1000), labels=(c(0,10,100,1000))) + 
+  geom_point(position=position_jitter(width=.1,height=0), size=5) + 
+  theme_bw() + #for white background panel
+  theme(text = element_text(size=20), axis.text.x = element_text(angle=90, hjust=1)) + 
+  coord_trans(y = "log10") +
+  scale_color_manual(values=c("red", "blue"))
+
+# MA plot
+plotMA(res.05, ylim=c(-5,5))
+
+# match DEG syntenic orthologs from each genome using the MSU nomeclauture as a referece from (see MCScanX script below)
+# get list of DEGs only called differentially expressed for a specific genome
+DEuniqueMH<- setdiff(x = DEMHorthologs, y = DEZSorthologs)
+DEuniqueMH<- setdiff(x = DEuniqueMH, y = DEMSUorthologs)
+DEuniqueMHnames<- match(x = DEuniqueMH, table = finalsynteny[,3])
+DEuniqueMHnames<- finalsynteny[DEuniqueMHnames,]
+DEuniqueMHnames<- DEuniqueMHnames[,1]
+
+# to query counts for gene loci
+counts(ddsMH)["MH03t0738500",]
+
+# to query counts for gene loci with low counts
+ddsprefilterZS<- DESeqDataSet(seZS, design = ~ condition)
+counts(ddsprefilterZS)["ZS12t0519200",]
+
+# make Venn diagram from syntenic lists
+DEGeneListSynteny<- list(MH63=DEMHorthologs, ZS97=DEZSorthologs, MSU=DEMSUorthologs)
+venn.diagram(DEGeneListSynteny, filename = "./vennDE.tif", imagetype = "tiff", fill = c("midnightblue","yellow","lightseagreen"), cex = 1.5, fontface = "bold", cat.cex = 1.5, cat.fontface = "bold", euler.d=TRUE, scaled=TRUE, na="remove" )
+
+# Get gene_ids of genes only identified as DEGs in one genome
+# SetLst is a named list of elements to compare
+Plot3WayVenn<-function(SetLst)
+{
+  #this package requires "Vennerable"
+  require(Vennerable)
+  
+  u<-unique(unlist(SetLst))
+  c1<-rep(0,length(u))
+  names(c1)<-u
+  c2<-c1
+  c3<-c1
+  c1[SetLst[[1]]]<-1
+  c2[SetLst[[2]]]<-1
+  c3[SetLst[[3]]]<-1
+  tlabs<-paste(c1,c2,c3,sep="")
+  ttab<-table(tlabs)
+  names(tlabs)<-names(c1)
+  AllSets<-tapply(names(tlabs),tlabs,function(x) x)
+  return(AllSets)
+  ret<-Venn(Weight = ttab, SetNames = names(SetLst))
+  return(ret)
+  
+}
+
+a<- lapply(DEGeneListSynteny, function(x) which(is.na(x)))
+DEGeneListSynteny_no_na<- lapply(1:3, function(x) DEGeneListSynteny[[x]][a[[x]]])
+varDESeq2<- Plot3WayVenn(DEGeneListSynteny_no_na)
+DEMHonly<- varDESeq2[[4]]
+DEZSonly<- varDESeq2[[2]]
+DEMSUonly<- varDESeq1[[1]]
+
+# get adjusted pvals for all sig DEGs for density plot
+DEMHpvals<- which(res.05LFC1MH[,6]<=0.05)
+DEMHpvals<- res.05LFC1MH[DEMHpvals,6]
+
+# compare adjusted pvals of unique DEGs between MH and MSU
+DEMSUuniquevsMH<- setdiff(DEGeneListSyntenyNEW_no_na[[3]], DEGeneListSyntenyNEW_no_na[[1]])
+a<- match(DEMHuniquevsMSU, finalsyntenyNEW$V3)
+a<- finalsyntenyNEW$V2[a]
+DEMHpvals_unique_vMSU<- res.05LFC1MH[a,]
+DEMHpvals_unique_vMSU<- DEMHpvals_unique_vMSU[,6]
+
+temp_res.05MSU<- as.data.frame(res.05LFC1MSU)
+a<- temp_res.05MSU[DEMHuniquevsMSU,]
+DEMHpvals_unique_vMSU_MSU_pvals<- a[,6]
+
+DEMHunique_pvals_list<- list(MH63=DEMHpvals_unique_vMSU, MSU=DEMHpvals_unique_vMSU_MSU_pvals)
+
+a<- temp_res.05MSU[DEMSUuniquevsMH,]
+DEMSUuniquepvals_vMH<- a[,6]
+a<- match(DEMSUuniquevsMH, finalsyntenyNEW$V3)
+a<- finalsyntenyNEW$V2[a] 
+temp_res.05MH<- as.data.frame(res.05LFC1MH)
+DEMSUuniquepvals_vMH_MH_pvals<- temp_res.05MH[a,]
+DEMSUuniquepvals_vMH_MH_pvals<- DEMSUuniquepvals_vMH_MH_pvals[,6]
+
+DEMSUunique_pvals_list<- list(MH63=DEMSUuniquepvals_vMH_MH_pvals, MSU=DEMSUuniquepvals_vMH)  
+
+# make histograms of adjusted pvals of unique DEGs between MH and MSU
+a<- DEMHpvals_unique_vMSU
+b<- DEMHpvals_unique_vMSU_MSU_pvals
+ah<- hist(a, breaks = seq(0,1,0.025))
+bh<- hist(b, alpha.f = 0.6), breaks= seq(0,1,0.025)) 
+plot(ah, col=adjustcolor(col="midnightblue", alpha.f = 0.6))
+plot(bh, add=T, col=adjustcolor(col="lightseagreen", alpha.f = 0.6))
+
+d<- DEMSUuniquepvals_vMH
+e<- DEMSUuniquepvals_vMH_MH_pvals
+dh<- hist(d, breaks = seq(0,1,0.025))
+eh<- hist(e, breaks= seq(0,1,0.025)) 
+plot(dh, col=adjustcolor(col="lightseagreen", alpha.f = 0.6))
+plot(eh, add=T, col=adjustcolor(col="midnightblue", alpha.f = 0.6))
+
+# compare DEGs with > 4-fold change
+temp_res.05MSUsig<- as.data.frame(res.05SigLFC1MSU)
+MSUpos4<- temp_res.05MSUsig[which(temp_res.05MSUsig[,2]>4),]
+MSUneg4<- temp_res.05MSUsig[which(temp_res.05MSUsig[,2]< -4),]
+MSUnamesFC4<- c(row.names(MSUpos4), row.names(MSUneg4))
+a<- match(MSUnamesFC4, finalsyntenyNEW$V3)
+MSUnamesFC4<- finalsyntenyNEW$V3[a]
+a<- which(!is.na(MSUnamesFC4))
+MSUnamesFC4<- MSUnamesFC4[a]
+
+temp_res.05MHsig<- as.data.frame(res.05SigLFC1MH)
+MHpos4<- temp_res.05MHsig[which(temp_res.05MHsig[,2]>4),]
+MHneg4<- temp_res.05MHsig[which(temp_res.05MHsig[,2]< -4),]
+MHnamesFC4<- c(row.names(MHpos4), row.names(MHneg4))
+a<- match(MHnamesFC4, finalsyntenyNEW$V2)
+MHnamesFC4_MSUnames<- finalsyntenyNEW$V3[a]
+a<- which(!is.na(MHnamesFC4_MSUnames))
+MHnamesFC4_MSUnames<- MHnamesFC4_MSUnames[a]
+
+temp_res.05ZSsig<- as.data.frame(res.05SigLFC1ZS)
+ZSpos4<- temp_res.05ZSsig[which(temp_res.05ZSsig[,2]>4),]
+ZSneg4<- temp_res.05ZSsig[which(temp_res.05ZSsig[,2]< -4),]
+ZSnamesFC4<- c(row.names(ZSpos4), row.names(ZSneg4)) 
+a<- match(ZSnamesFC4, finalsyntenyNEW$V7)
+ZSnamesFC4_MSUnames<- finalsyntenyNEW$V3[a]
+a<- which(!is.na(ZSnamesFC4_MSUnames))
+ZSnamesFC4_MSUnames<- ZSnamesFC4_MSUnames[a]
+
+venn.diagram(list(MH63=MHnamesFC4_MSUnames, ZS97=ZSnamesFC4_MSUnames, MSU=MSUnamesFC4), filename = "./vennFC4All.tif", imagetype = "tiff", fill = c("midnightblue","yellow","lightseagreen"), cex = 1.5, fontface = "bold", cat.cex = 1.5, cat.fontface = "bold", euler.d=TRUE, scaled=TRUE )
+
