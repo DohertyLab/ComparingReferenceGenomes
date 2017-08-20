@@ -1,0 +1,91 @@
+####################################################
+#                 JunctionSeq                      #
+####################################################
+
+# manually installed JunctionSeq package 
+# CRAN package dependencies:
+install.packages("statmod");
+install.packages("plotrix");
+install.packages("stringr");
+install.packages("Rcpp");
+install.packages("RcppArmadillo");
+install.packages("locfit");
+install.packages("Hmisc");
+# Bioconductor dependencies:
+source("http://bioconductor.org/biocLite.R");
+biocLite();
+biocLite("Biobase");
+biocLite("BiocGenerics");
+biocLite("BiocParallel");
+biocLite("GenomicRanges");
+biocLite("IRanges");
+biocLite("S4Vectors");
+biocLite("genefilter");
+biocLite("geneplotter");
+biocLite("SummarizedExperiment");
+biocLite("DESeq2");
+install.packages("http://hartleys.github.io/JunctionSeq/install/JunctionSeq_LATEST.tar.gz",
+                 repos = NULL,
+                 type = "source");
+
+# 4.1 Generating raw counts via QoRT for all bam files being used (in terminal)
+# for MH63
+java -jar ~/JunctionSeq/QoRTs.jar QC --stranded  --singleEnded --minMAPQ 50 ~/Indica_BAM/S46_Dawn_C.1.bam ~/Indica_genome_files/FinalGFF_MH.gtf ~/JunctionSeq/MH63/MH63_Dawn_C.1
+# for ZS97
+java -jar ~/JunctionSeq/QoRTs.jar QC --stranded  --singleEnded --minMAPQ 50 ~/ZS_BAM/ZS_Dawn_C.1.bam ~/Indica_genome_files/FinalGTF_ZS.gtf ~/JunctionSeq/ZS97/ZS_Dawn_C.1
+# for Nipponbare MSU
+java -jar ~/JunctionSeq/QoRTs.jar QC --stranded  --singleEnded --minMAPQ 50 ~/MSU_BAM/1-Dawn_C.1.bam ~/Japonica_genome_files/MSU/FinalGTFMSU_no_na.gtf ~/JunctionSeq/MSU/MSU_Dawn_C.1
+
+
+# Make sample table and decoder file
+sampleTable = data.frame(
+row.names = c( "MSU_Dawn_C.1", "MSU_Dawn_C.2", "MSU_Dawn_C.3",
+"MSU_Dawn_C.4", "MSU_Dusk_C.1", "MSU_Dusk_C.2", "MSU_Dusk_C.3", "MSU_Dusk_C.4" ),
+condition = c(rep("Dawn",4), rep("Dusk", 4)))
+
+decoder<-sampleTable
+decoder<-cbind(decoder,c("MSU_Dawn_C.1","MSU_Dawn_C.2","MSU_Dawn_C.3","MSU_Dawn_C.4", "MSU_Dusk_C.1", "MSU_Dusk_C.2","MSU_Dusk_C.3", "MSU_Dusk_C.4"))
+colnames(decoder)<-c("condition", "sample.ID")
+
+countFiles <- paste0("/storage/data_1/erins/JunctionSeq/MSU/",
+                     decoder$sample.ID,
+                     "/QC.spliceJunctionAndExonCounts.forJunctionSeq.txt.gz")
+
+# 4.4 Novel splice junctions
+write.table(decoder, file="decoder.txt", sep = "\t", row.names = F, quote=F)
+
+# In terminal
+java -jar /storage/data_1/erins/JunctionSeq/QoRTs.jar mergeNovelSplices --minCount 6 --stranded ~/JunctionSeq/MSU ~/JunctionSeq/MSU/decoder.txt ~/Japonica_gene_files/MSU/FinalGTFMSU_no_na.gtf ~/JunctionSeq/MSU
+
+# 5.1 for novel junctions
+jscs <- runJunctionSeqAnalyses(sample.files = countFiles,
+                               sample.names = decoder$sample.ID,
+                               condition=factor(decoder$condition),
+                               flat.gff.file = "withNovel.forJunctionSeq.gff.gz",
+                               nCores = 1,
+                               analysis.type = "junctionsAndExons")
+
+# 5.1 Exporting size factors (optional)
+writeSizeFactors(jscs, file = "sizeFactors.txt")
+
+# 5.3 Extracting test results
+writeCompleteResults(jscs,
+                     outfile.prefix="./test",
+                     save.jscs = TRUE)
+
+# 6 Visualization and interpretation
+buildAllPlots(jscs=jscs,
+              outfile.prefix = "./plots/",
+              use.plotting.device = "png",
+              FDR.threshold = 0.05)
+
+# plot only one gene at a time
+buildAllPlotsForGene(geneID = "LOC_Os12g39630", jscs = jscsMSU, colorRed.FDR.threshold = 0.05)
+
+# match JunctionSeq sig 0.05 genes from each genome to MSU orthologs (see MCScanX script below)
+AllDataMH<- jscsMH@featureData@data
+AllDataMH0.05<- AllDataMH[which(AllDataMH$padjust< 0.05),]
+JSeqMHnames<- AllDataMH0.05$geneID
+JSeqMHorthologs<- match(x = JSeqMHnames, table = finalsyntenyNEW$V2)
+JSeqMHorthologs<- finalsyntenyNEW[JSeqMHorthologs,]
+JSeqMHorthologs<- JSeqMHorthologs$V3
