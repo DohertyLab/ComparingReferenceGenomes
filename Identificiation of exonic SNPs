@@ -1,0 +1,218 @@
+############################################
+#     Identificiation of exonic SNPs       #
+############################################
+
+# SNP caller GATK function
+# !/bin/sh
+# ref.fa is reference genome used for aligment for bam files ***Chr names must be identical in alignment files**
+echo "Please enter SAM/BAM file"
+read fruit
+
+java -jar picard.jar ReorderSam I=$fruit O=${fruit}.bam R=ref.fa CREATE_INDEX=TRUE TMP_DIR=~/Path/to/temp 
+
+java -jar picard.jar AddOrReplaceReadGroups I=${fruit}.bam O=${fruit}2.bam SO=coordinate RGID=id RGLB=library RGPL=platform RGPU=machine RGSM=sample TMP_DIR=~/Path/to/temp  
+
+java -jar picard.jar MarkDuplicates I=${fruit}2.bam O=${fruit}3.bam CREATE_INDEX=true VALIDATION_STRINGENCY=SILENT M=${fruit}output.metrics TMP_DIR=~/Path/to/temp
+
+java -jar GenomeAnalysisTK.jar -T SplitNCigarReads -R ref.fa -I ${fruit}3.bam -o ${fruit}4.bam -rf ReassignOneMappingQuality -RMQF 255 -RMQT 60 -U ALLOW_N_CIGAR_READS  
+
+java -jar GenomeAnalysisTK.jar -T HaplotypeCaller -R ref.fa -I ${fruit}4.bam -dontUseSoftClippedBases -stand_call_conf 10.0 -o ${fruit}.vcf 
+
+java -jar GenomeAnalysisTK.jar -T VariantFiltration -R ref.fa -V ${fruit}.vcf -window 35 -cluster 3 -filterName FS -filter "FS > 30.0" -filterName QD -filter "QD < 2.0" -o ${fruit}2.vcf 
+
+#Packages
+
+library(dplyr)
+# This function identifies the number of exonic SNPs from the longest annotated transcript for each gene ***GTF format***
+SNPperTx2<-function(TorF_SNP_trnascript_vector, gff_of_trnascripts){
+  
+  t1=NULL
+  for(i in 1:length(gff_of_trnascripts[,5])){
+    txsum=sum(TorF_SNP_trnascript_vector[gff_of_trnascripts[i,5]:gff_of_trnascripts[i,4]])
+    t1=c(t1,txsum)
+  }
+  return(t1)
+}
+
+MH63=read.vcfR(file= "MHmerge.bam2.vcf")
+ZS97=read.vcfR(file="ZSmerge.bam2.vcf")
+MSU=read.vcfR(file= "MSUmerge.bam2.vcf")
+
+MH63mat=MH63@fix
+ZS97mat=ZS97@fix
+MSUmat=MSU@fix
+
+for(i in unique(MH63mat[,1])){
+  print(length(which(MH63mat[,1]==i)))
+}
+
+for(i in unique(ZS97mat[,1])){
+  print(length(which(ZS97mat[,1]==i)))
+}
+
+for(i in unique(MSUmat[,1])){
+  print(length(which(MSUmat[,1]==i)))
+}
+
+
+MH_GTF=read.table(file = "FinalGTF_MH.gtf", sep = "\t", stringsAsFactors = F)
+ZS_GTF=read.table(file = "FinalGTF_ZS.gtf", sep = "\t", stringsAsFactors = F)
+MSU_GTF=read.table(file = "FinalGTFMSU_no_na.gtf", sep = "\t", stringsAsFactors = F)
+
+# length 12 becuase of 12 rice chr
+MH63snp=vector("list", 12)
+ZS97snp=vector("list", 12)
+MSUsnp=vector("list", 12)
+
+# get chr names
+names(MH63snp)<-unique(MH63mat[,1])[1:12]
+names(ZS97snp)<-unique(ZS97mat[,1])[1:12]
+names(MSUsnp)<-unique(MSUmat[,1])[1:12]
+
+# seperate vcf to chr list
+MH63snp=lapply(1:12,function(x) as.numeric(MH63mat[which(MH63mat[,1]==names(MH63snp)[x]),2]))
+ZS97snp=lapply(1:12,function(x) as.numeric(ZS97mat[which(ZS97mat[,1]==names(ZS97snp)[x]),2]))
+MSUsnp=lapply(1:12,function(x) as.numeric(MSUmat[which(MSUmat[,1]==names(MSUsnp)[x]),2]))
+
+# name snp list
+names(MH63snp)<-unique(MH63mat[,1])[1:12]
+names(ZS97snp)<-unique(ZS97mat[,1])[1:12]
+names(MSUsnp)<-unique(MSUmat[,1])[1:12]
+
+# create for snp position
+MH_tx=vector("list", 12)
+ZS_tx=vector("list", 12)
+MSU_tx=vector("list", 12)
+
+# name snp position list
+MH_tx=lapply(1:12,function(x) (MH_GTF[which(MH_GTF[,1]==names(MH63snp)[x]),]))
+ZS_tx=lapply(1:12,function(x) (ZS_GTF[which(ZS_GTF[,1]==names(ZS97snp)[x]),]))
+MSU_tx=lapply(1:12,function(x) (MSU_GTF[which(MSU_GTF[,1]==names(MSUsnp)[x]),]))
+
+names(MH_tx)<-unique(MH63mat[,1])[1:12]
+names(ZS_tx)<-unique(ZS97mat[,1])[1:12]
+names(MSU_tx)<-unique(MSUmat[,1])[1:12]
+
+# get gene name
+MH_tx=lapply(MH_tx, function(x) x[which(x[,3]=="gene"),])
+ZS_tx=lapply(ZS_tx, function(x) x[which(x[,3]=="gene"),])
+MSU_tx=lapply(MSU_tx, function(x) x[which(x[,3]=="gene"),])
+
+# create vector from 1 to length of last nt postion that is exonic
+TorF_MH=lapply(1:12,function(x) 1:max(MH_tx[[x]][,5]) %in% MH63snp[[x]])
+TorF_ZS=lapply(1:12,function(x) 1:max(ZS_tx[[x]][,5]) %in% ZS97snp[[x]])
+TorF_MSU=lapply(1:12,function(x) 1:max(MSU_tx[[x]][,5]) %in% MSUsnp[[x]])
+
+# call nt position within vector as a SNP
+MH_SNPperTx=lapply(1:12,function(x) SNPperTx2(TorF_SNP_trnascript_vector = TorF_MH[[x]], gff_of_trnascripts = MH_tx[[x]]))
+ZS_SNPperTx=lapply(1:12,function(x) SNPperTx2(TorF_SNP_trnascript_vector = TorF_ZS[[x]], gff_of_trnascripts = ZS_tx[[x]]))
+MSU_SNPperTx=lapply(1:12,function(x) SNPperTx2(TorF_SNP_trnascript_vector = TorF_MSU[[x]], gff_of_trnascripts = MSU_tx[[x]]))
+
+# get exon names of trnascipt with the most exons
+MH_SNPperTx=lapply(1:12,function(y) setNames(MH_SNPperTx[[y]],sapply(strsplit(MH_tx[[y]][,9], split = " "), function(x) x[2])))
+ZS_SNPperTx=lapply(1:12,function(y) setNames(ZS_SNPperTx[[y]],sapply(strsplit(ZS_tx[[y]][,9], split = " "), function(x) x[2])))
+MSU_SNPperTx=lapply(1:12,function(y) setNames(MSU_SNPperTx[[y]],substring(sapply(strsplit(MSU_tx[[y]][,9], split = " "), function(x) x[2]),first = 1,last = 14)))
+
+MH_SNPperTx=lapply(1:12,function(y) setNames(MH_SNPperTx[[y]],paste(substring(sapply(strsplit(MH_tx[[y]][,9], split = " "), function(x) x[4]),first = 1,last = 15),sapply(strsplit(MH_tx[[y]][,9], split = " "), function(x) x[8]),sep = ":E0")))
+ZS_SNPperTx=lapply(1:12,function(y) setNames(ZS_SNPperTx[[y]],paste(substring(sapply(strsplit(ZS_tx[[y]][,9], split = " "), function(x) x[4]),first = 1,last = 15),sapply(strsplit(ZS_tx[[y]][,9], split = " "), function(x) x[8]),sep = ":E0")))
+MSU_SNPperTx=lapply(1:12,function(y) setNames(MSU_SNPperTx[[y]],paste(substring(sapply(strsplit(MSU_tx[[y]][,9], split = " "), function(x) x[2]),first = 1,last = 16),sapply(strsplit(MSU_tx[[y]][,9], split = " "), function(x) x[6]),sep = ":E00")))
+
+MH_SNPperTx=lapply(1:12,function(x) setNames(MH_SNPperTx[[x]],paste(substring(names(MH_SNPperTx[[x]]),first = 1, last=12), substring(names(MH_SNPperTx[[x]]),first = 16, last=20), sep = "")))
+ZS_SNPperTx=lapply(1:12,function(x) setNames(ZS_SNPperTx[[x]],paste(substring(names(ZS_SNPperTx[[x]]),first = 1, last=12), substring(names(ZS_SNPperTx[[x]]),first = 16, last=20), sep = "")))
+MSU_SNPperTx=lapply(1:12,function(x) setNames(MSU_SNPperTx[[x]],paste(substring(names(MSU_SNPperTx[[x]]),first = 1, last=14), substring(names(MSU_SNPperTx[[x]]),first = 16, last=20), sep = "")))
+
+MH_SNPperTx=lapply(1:12,function(x) MH_SNPperTx[[x]][unique(names(MH_SNPperTx[[x]]))])
+ZS_SNPperTx=lapply(1:12,function(x) ZS_SNPperTx[[x]][unique(names(ZS_SNPperTx[[x]]))])
+MSU_SNPperTx=lapply(1:12,function(x) MSU_SNPperTx[[x]][unique(names(MSU_SNPperTx[[x]]))])
+
+# calculate SNPs per exon
+MH_SNPexon<- unlist(MH_SNPperTx)
+MH_SNPexon<- as.matrix(MH_SNPexon)
+MH_SNPexonNames<- gsub(pattern = "-[[:digit:]]{2}", replacement = "", x = row.names(MH_SNPexon))
+row.names(MH_SNPexon)<- MH_SNPexonNames
+colnames(MH_SNPexon)<- c("Exon_SNPs")
+
+ZS_SNPexon<- unlist(ZS_SNPperTx)
+ZS_SNPexon<- as.matrix(ZS_SNPexon)
+colnames(ZS_SNPexon)<- c("Exon_SNPs")
+
+MSU_SNPexon<- unlist(MSU_SNPperTx)
+MSU_SNPexon<- as.matrix(MSU_SNPexon)
+colnames(MSU_SNPexon)<- c("Exon_SNPs")
+
+# re-format to add only gene_id in additional column that can be matched with finalsyntenyNEW 
+# for MH SNPs
+MH_SNPexonDF<- matrix(ncol = 2, nrow = 246338)
+MH_SNPexonDF[,1]<- MH_SNPexon[,1]
+row.names(MH_SNPexonDF)<- row.names(MH_SNPexon)
+MH_SNPexonDF<- as.data.frame(MH_SNPexonDF)
+MH_SNPexonDF$V2<- row.names(MH_SNPexon)
+MH_SNPexonDF$V2<- gsub(pattern = ":[[:alpha:]]{1}[[:digit:]]{3}", replacement = "", x = MH_SNPexonDF$V2)
+
+# for MSU SNPs
+MSU_SNPexonDF<- matrix(ncol = 2, nrow = 214173)
+MSU_SNPexonDF[,1]<- MSU_SNPexon[,1]
+row.names(MSU_SNPexonDF)<- row.names(MSU_SNPexon)
+MSU_SNPexonDF<- as.data.frame(MSU_SNPexonDF)
+MSU_SNPexonDF$V2<- row.names(MSU_SNPexon)
+MSU_SNPexonDF$V2<- gsub(pattern = ":[[:alpha:]]{1}[[:digit:]]{3}", replacement = "", x = MSU_SNPexonDF$V2)
+
+# for ZS SNPs
+ZS_SNPexonDF<- matrix(ncol = 2, nrow = 232892)
+ZS_SNPexonDF[,1]<- ZS_SNPexon[,1]
+row.names(ZS_SNPexonDF)<- row.names(ZS_SNPexon)
+ZS_SNPexonDF<- as.data.frame(ZS_SNPexonDF)
+ZS_SNPexonDF$V2<- row.names(ZS_SNPexon)
+ZS_SNPexonDF$V2<- gsub(pattern = ":[[:alpha:]]{1}[[:digit:]]{3}", replacement = "", x = ZS_SNPexonDF$V2)
+
+# match syntenic orthologs
+MH_SNPexonDFSynNames<- intersect(x = finalsyntenyNEW$V2, y = MH_SNPexonDF$V2)
+MHSNPind<- which(MH_SNPexonDF$V2 %in% MH_SNPexonDFSynNames)
+MH_SNPexonDFSyn<- MH_SNPexonDF[MHSNPind,]
+
+ZS_SNPexonDFSynNames<- intersect(x = finalsyntenyNEW$V7, y = ZS_SNPexonDF$V2)
+ZSSNPind<- which(ZS_SNPexonDF$V2 %in% ZS_SNPexonDFSynNames)
+ZS_SNPexonDFSyn<- ZS_SNPexonDF[ZSSNPind,]
+
+MSU_SNPexonDFSynNames<- intersect(x = finalsyntenyNEW$V3, y = MSU_SNPexonDF$V2)
+MSUSNPind<- which(MSU_SNPexonDF$V2 %in% MSU_SNPexonDFSynNames)
+MSU_SNPexonDFSyn<- MSU_SNPexonDF[MSUSNPind,]
+
+# This function sums the number of exonic SNPs per gene
+# use objects MH_SNPexonDFSyn, ZS_SNPexonDFSyn, and MSU_SNPexonDFSyn to compare exonic SNPs per gene for syntenic genes
+# inputs:
+# data.frame of gene_exon_ids, SNPs/exon, gene_ids that match format of gtf and synteny files (e.g. MH_SNPexonDFSyn)
+# list of syntenic gene_ids (e.g. MH_SNPexonDFSynNames)
+
+ExonSNPCount<- function(df, genenames)
+{
+  exonsum<- matrix(ncol = 1, nrow = length(genenames))
+  row.names(exonsum)<- genenames
+  colnames(exonsum)<- c("exonic_SNPs_per_gene")
+  for(i in genenames)
+  {
+    geneSNPind<- which(df$V2 %in% i)
+    geneSNP<- df[geneSNPind,]
+    geneSNPcount<- sum(geneSNP$V1)
+
+    exonsum[i,1]<- geneSNPcount
+  }
+  return(exonsum)
+}
+
+# calculate exonic SNPs/gene
+MH_SNPexonSynSums<- ExonSNPCount(df = MH_SNPexonDFSyn, genenames = MH_SNPexonDFSynNames)
+ZS_SNPexonSynSums<- ExonSNPCount(df = ZS_SNPexonDFSyn, genenames = ZS_SNPexonDFSynNames)
+MSU_SNPexonSynSums<- ExonSNPCount(df = MSU_SNPexonDFSyn, genenames = MSU_SNPexonDFSynNames)
+
+# assemble matrix of exonic SNPs
+exonicSNPs<- matrix(ncol = 3, nrow = 21145)
+exonicSNPs[,1]<- MH_SNPexonSynSums[,1]
+exonicSNPs[,2]<- ZS_SNPexonSynSums[,1]
+exonicSNPs[,3]<- MSU_SNPexonSynSums[,1]
+row.names(exonicSNPs)<- row.names(MH_SNPexonSynSums)
+colnames(exonicSNPs)<- c("MH63", "ZS97", "MSU")
+
+# note: see below for values of j and naAll
+exonicSNPs<- exonicSNPs[-j,]
+exonicSNPs<- exonicSNPstest[-naAll,]
