@@ -1,0 +1,112 @@
+# Driver function= GFFtoGTF
+
+# This function is used to parse a GFF file (Assumes no header by default)
+# Columns: 1 - Chromosome, 2 - Genome Version, 3 - Feature Type ("chromosome","gene","mRNA","CDS","Protein", etc.), 4 - Start BP, 5 - End BP, 7 - Strand (+/-), 9 - Name 
+ParseGFF<-function(filenm, sep="\t", header=F, ...)
+{
+  library(stringr)
+  # load the file
+  print(paste(" Reading GFF File: ",filenm))
+  tgff<-read.csv(file = filenm, sep = sep, header = header, stringsAsFactors=F, ...)
+  
+  # construct an array
+  # [[Chromosome]]
+  #   [[FeatureType]]
+  #       [Matrix]
+  ret<-tapply(1:nrow(tgff), INDEX = tgff[,1], function(x) PGFF1(tgff[x,]))
+  
+  # convert chromosome names
+  rnm<-names(ret)
+  rnm<-gsub("Chr","",rnm)
+  names(ret)<-rnm
+  
+  return(ret)
+}
+
+PGFF1<-function(chgff)
+{
+  chret<-tapply(1:nrow(chgff), INDEX = chgff[,3], function(y) chgff[y,])
+}
+
+# function to convert GFF to GTF in correct format
+# feat=feature
+# outfile=output file name of gtf file ("/path/to/filename.gtf")
+GFFtoGTF<-function(GFFfile, sep="\t", outfile)
+{
+  require(stringr)
+  GFFlist<-ParseGFF(filenm = GFFfile, sep=sep)
+  GFFlist<-lapply(GFFlist, function(chr) lapply(chr, function(feat) DriveSplit(feat)))
+  
+  final<-deParseGFF(GFFin = GFFlist, filename = outfile)
+  return(final)
+}
+
+# The splitV9 function splits up attributes in V9
+# instr=input string
+# kvsep=key value seperator
+# type=exon or CDS
+splitV9<-function(instr, type, sep2=";", kvsep="=")
+{
+  original<-instr
+  instr<-str_replace_all(string = instr, pattern = "=", replacement = " ")
+  instr<-gsub(x = instr, pattern = "(;|:)", replacement = "; ", fixed = T)
+  # note: "pattern" for idstr and transid below is shown for the Nipponbare MSU genome, change "pattern" to match MH63 or ZS97 genomes accordingly
+  idstr<-str_extract(string = instr, pattern = "ID LOC_Os[[:alpha:]]{0,2}[[:digit:]]{2}.{1}[[:digit:]]{5}[[^;]]*;")
+  
+  if(!is.na(idstr))
+  {
+    idstr<-str_split(string = idstr, pattern = "\\.")[[1]][1]
+    idstr<-gsub(pattern = "ID", replacement = "gene_id", x = idstr)
+  }
+  
+  retstr<-idstr
+  if(type=="exon" | type=="CDS")
+  {
+    if (type=="exon")
+    {
+      nmstr<-str_extract(string = instr, pattern = "exon_[[:digit:]]{1,2}")
+      nmstr<-gsub(pattern = "exon\\_", replacement = "", x = nmstr)
+    }
+    
+    else
+    {
+      nmstr<-str_extract(string = instr, pattern = "cds_[[:digit:]]{1,2}")
+      nmstr<-gsub(pattern = "cds\\_", replacement = "", x = nmstr)
+    }
+    
+    transid<-str_extract(string = instr, pattern = "Parent LOC_Os[[:alpha:]]{0,2}[[:digit:]]{2}.{1}[[:digit:]]{5}\\.[[:digit:]]{1,2}")
+    transid<-gsub(pattern = "Parent", replacement = "transcript_id", x = transid)
+    retstr<-paste(retstr, "; ", transid, "; exon_number ", nmstr, sep = "")
+  }
+  
+  return(retstr)
+}
+
+DriveSplit<-function(inDf)
+{
+  inDf$V9<-sapply(inDf$V9,function(x) splitV9(x,type=inDf$V3[1]))
+  return(inDf)
+}
+
+# This function creates a flat file from GFF object
+# input: GFF object (GFFin), created by ParseGFF
+# input: filename (fname)
+# output: flat file
+
+deParseGFF<-function(GFFin, filename)
+{
+  GFFin<-lapply(GFFin, function(x) do.call(rbind, x))
+  GFFin<-lapply(GFFin, function(x) x[order(x$V4),])
+  retmat<-do.call(rbind, GFFin)
+  write.table(x = retmat, file = filename, quote = F, sep = "\t", row.names = F, col.names = F, append = F)
+  return(TRUE)
+}
+
+# remove NA's from Nipponbare_MSU gtf
+FinalGTFMSU<-read.table(file = "~/Japonica_genome_files/MSU/FinalGTFMSU.gtf", sep = "\t", stringsAsFactors = F)
+i<-which(FinalGTFMSU$V1=="ChrUn")
+j<-which(FinalGTFMSU$V1=="ChrSy")
+k<-c(i, j)
+FinalGTFMSU2<-FinalGTFMSU[-k,]
+write.table(x = FinalGTFMSU2, file="~/Japonica_genome_files/MSU/FinalGTFMSU_no_na.gtf", quote = F, sep = "\t", col.names = F, row.names = F)
+
