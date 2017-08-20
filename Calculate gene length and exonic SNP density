@@ -1,0 +1,57 @@
+###################################################
+#   Calculate gene length and exonic SNP density  #
+###################################################
+
+# exonic SNP density= exonic SNPs per gene/gene length
+# determine gene length
+# for MH63
+MH63genelength<- matrix(nrow = 57174, ncol = 2)
+MH63genelength[,1]<- MH63newgtf$V4
+MH63genelength[,2]<- MH63newgtf$V5
+row.names(MH63genelength)<- MH63newgtf$V9
+b<- sapply(1:nrow(MH63genelength), function(x) abs(MH63genelength[x,2]-MH63genelength[x,1]))
+MH63genelength<- cbind(MH63genelength, b)
+colnames(MH63genelength)<- c("gene_start", "gene_stop", "gene_length")
+
+# for ZS97
+ZS97genelength<- matrix(nrow = 54831, ncol = 2)
+ZS97genelength[,1]<- ZS97newgtf$V4
+ZS97genelength[,2]<- ZS97newgtf$V5
+row.names(ZS97genelength)<- ZS97newgtf$V9
+d<- sapply(1:nrow(ZS97genelength), function(x) abs(ZS97genelength[x,2]-ZS97genelength[x,1]))
+ZS97genelength<- cbind(ZS97genelength, d)
+colnames(ZS97genelength)<- c("gene_start", "gene_stop", "gene_length")
+
+# for MSU
+MSUgenelength<- matrix(nrow = 55801, ncol = 2)
+MSUgenelength[,1]<- MSUnewgtf$V4
+MSUgenelength[,2]<- MSUnewgtf$V5
+row.names(MSUgenelength)<- MSUnewgtf$V9
+e<- sapply(1:nrow(MSUgenelength), function(x) abs(MSUgenelength[x,2]-MSUgenelength[x,1]))
+MSUgenelength<- cbind(MSUgenelength, e)
+colnames(MSUgenelength)<- c("gene_start", "gene_stop", "gene_length")
+
+# gene length for only syntenic orthologs
+MH63genelengthsyn<- match(x = finalsyntenyNEW$V2, row.names(MH63genelength))
+MH63genelengthsyn<- MH63genelength[MH63genelengthsyn,]
+
+ZS97genelengthsyn<- match(x = finalsyntenyNEW$V7, table = row.names(ZS97genelength))
+ZS97genelengthsyn<- ZS97genelength[ZS97genelengthsyn,]
+
+MSUgenelengthsyn<- match(x = finalsyntenyNEW$V3, table = row.names(MSUgenelength))
+MSUgenelengthsyn<- MSUgenelength[MSUgenelengthsyn,]
+
+genelength<- matrix(ncol = 3, nrow = 21145)
+genelength[,1]<- MH63genelengthsyn[,3]
+genelength[,2]<- ZS97genelengthsyn[,3]
+genelength[,3]<- MSUgenelengthsyn[,3]
+row.names(genelength)<- row.names(MSUgenelengthsyn)
+colnames(genelength)<- c("MH63", "ZS97", "MSU")
+genelength_no_na<- genelength[-j,]
+nagenelength<- genelength_no_na[-naAll,]
+genelengthsubset<- interset(row.names(nacount), row.names(nagenelength))
+genelengthsubset<- nagenelength[genelengthsubset,]
+
+# exonic SNP density
+exonicSNPdensity<- data.matrix(exonicSNPs/genelengthsubset)
+
