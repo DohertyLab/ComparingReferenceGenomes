@@ -1,0 +1,38 @@
+##########################################################################
+#   TopHat v2.1.0 Alignment of IR64 fastq files to three Oryza genomes   #
+##########################################################################
+
+# build bowtie index for each genome
+bowtie2-build ~/Indica_genome_files/MH63_1.seq ~/MH_index/MH_index
+
+# for MH63 genome
+tophat --num-threads 12 --output-dir S10 --GTF ~/Indica_genome_files/FinalGTF_MH.gtf --library-type fr-firststrand ~/MH_index/MH_index /storage/data_1/jigar/IRRI_RNAseq/fastq_files/1-Dawn_C.1.fastq
+
+# for ZS97 genome
+tophat --num-threads 12 --output-dir ~/1-Dawn_C.1 --GTF ~/Indica_genome_files/FinalGTF_ZS.gtf --library-type fr-firststrand ~/ZS_index/ZS_index /storage/data_1/jigar/IRRI_RNAseq/fastq_files/Panicle_50_Control/1-Dawn_C.1.fastq 
+
+# for MSU genome
+tophat --num-threads 12 --output-dir ~/1-Dawn_C.1 --GTF ~/Japonica_genome_files/MSU/FinalGTFMSU_no_na.gtf --library-type fr-firststrand ~/MSU_MSU_index/MSU_MSU_index /storage/data_1/jigar/IRRI_RNAseq/fastq_files/Panicle_50_Control/1-Dawn_C.1.fastq
+
+# use function "tophat_indica" to call tophat_indica_function
+# !/bin/bash
+
+for i in $(ls *.fastq)
+
+do 
+
+tophat --num-threads 12 --output-dir ~/${i%.fastq} --GTF ~/Indica_genome_files/FinalGTF_MH.gtf --library-type fr-firststrand ~/MH_index/MH_index ${i}
+
+done
+
+# change settings of function file
+chmod 755 tophat_indica_function
+# make bash profile:
+nano ~/.bash_profile
+# add to bash profile
+PATH=$PATH: ~/Bash
+export PATH
+# save and exit nano
+source ~/.bash_profile
+
+tophat_indica_function
