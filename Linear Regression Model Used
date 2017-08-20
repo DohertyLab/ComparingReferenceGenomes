@@ -1,0 +1,75 @@
+###################################################
+#             Linear regression model             #
+###################################################
+
+# assemble log2 values of MH63:MSU ratios of response and explanatory variables to use for linear model
+# counts
+counts_ratio_log<- nacount[,1]/nacount[,3]
+counts_ratio_log<- log2(counts_ratio_log)
+a<- names(counts_ratio_log)
+
+# exon length
+exlength_ratio_log<- exonlength[,1]/exonlength[,3]
+exlength_ratio_log<- log2(exlength_ratio_log)
+exlength_ratio_log<- exlength_ratio_log[a]
+
+# gene length
+genelength_ratio_log<- genelengthsubset[,1]/genelengthsubset[,3]
+genelength_ratio_log<- log2(genelength_ratio_log)
+genelength_ratio_log<- genelength_ratio_log[a]
+
+# exon number
+MHMSUexonnumberratiolog<- MHMSUexonnumber[,1]/MHMSUexonnumber[,2]
+MHMSUexonnumberratiolog<- log2(MHMSUexonnumberratiolog)
+exnumber_ratio_log<- MHMSUexonnumberratiolog[a]
+
+# exonic SNP density
+snp_ratio<- exonicSNPsdensity
+snp_ratio<- snp_ratio+0.0000000001
+snp_ratio<- snp_ratio[,1]/snp_ratio[,3]
+snp_ratio_log<- log2(snp_ratio)
+snp_ratio_log<- snp_ratio_log[a]
+
+# assemble data frame
+df<- cbind(counts_ratio_log, exlength_ratio_log, genelength_ratio_log, exnumber_ratio_log, snp_ratio_log)
+df<- as.data.frame(df)
+
+lmfinal<- lm(df$counts_ratio_log ~ df$exlength_ratio_log + df$genelength_ratio_log + df$exnumber_ratio_log + df$snp_ratio_log)
+summary(lmfinal)
+
+Call:
+  lm(formula = df$counts_ratio_log ~ df$exlength_ratio_log + 
+       df$genelength_ratio_log + df$exnumber_ratio_log + 
+       df$snp_ratio_log)
+
+Residuals:
+  Min       1Q   Median       3Q      Max 
+-13.7960  -0.1939   0.0435   0.1959  11.8888 
+
+Coefficients:
+  Estimate Std. Error t value Pr(>|t|)    
+(Intercept)                   -0.1302786  0.0101702 -12.810  < 2e-16 ***
+  df$exlength_ratio_log        0.4512914  0.0169183  26.675  < 2e-16 ***
+  df$genelength_ratio_log      0.1658273  0.0197290   8.405  < 2e-16 ***
+  df$exnumber_ratio_log        0.2233650  0.0205788  10.854  < 2e-16 ***
+  df$snp_ratio_log             0.0015790  0.0006088   2.594  0.00951 ** 
+  ---
+  Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 1.075 on 17034 degrees of freedom
+Multiple R-squared:  0.1595,	Adjusted R-squared:  0.1593 
+F-statistic: 808.1 on 4 and 17034 DF,  p-value: < 2.2e-16
+
+anovalm<- anova(lmfinal)
+Analysis of Variance Table
+
+Response: genematall$counts_ratio_log
+                          Df  Sum Sq Mean Sq   F value    Pr(>F)    
+df$exlength_ratio_log     1  3192.2  3192.2 2760.3421 < 2.2e-16 ***
+df$genelength_ratio_log   1   402.6   402.6  348.1157 < 2.2e-16 ***
+df$exnumber_ratio_log     1   135.5   135.5  117.1687 < 2.2e-16 ***
+df$snp_ratio_log          1     7.8     7.8    6.7267  0.009506 ** 
+Residuals                     17034 19698.9     1.2                        
+---
+  Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
