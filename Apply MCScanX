@@ -1,0 +1,121 @@
+########################################
+#               MCScanX                #
+########################################
+
+# in terminal
+unzip MCscanX.zip
+cd MCScanX
+make
+
+# generate xyz.blast file for each genome (in terminal)
+# blastall -i query_file -d database –p blastp –e 1e-10 –b 5 –v 5 –m 8 –o xyz.blast
+
+blastall -i ~/Reciprocal_best_blast/blastdb/MH63.pacbio.pep.LocusLevel.fa -d ~/Reciprocal_best_blast/blastdb/ZS97_pep_Locus.fa -p blastp -e 1e-10 -b 5 -v 5 -m 8 -o MH63.blast
+blastall -i ~/Reciprocal_best_blast/blastdb/MH63.pacbio.pep.LocusLevel.fa -d ~/Reciprocal_best_blast/blastdb/MSU_pep_Locus.fa -p blastp -e 1e-10 -b 5 -v 5 -m 8 -o MH63_MSU.blast
+blastall -i ~/Reciprocal_best_blast/blastdb/ZS97_pep_Locus.fa -d ~/Reciprocal_best_blast/blastdb/MSU_pep_Locus.fa -p blastp -e 1e-10 -b 5 -v 5 -m 8 -o ZS97_MSU.blast
+
+# re-format gtf files to hae columns: sp#, gene, start_position, stop_position
+MH63gtf<- ParseGFF(filenm = "~/Indica_genome_files/FinalGTF_MH.gtf")
+MH63genes<- GetChromLocs(tGFF = MH63gtf, GeneFeat = "gene")
+n<- MH63genes$V1
+n<- gsub(pattern = "Chr", replacement = "MH", x = n, fixed = T)
+MH63genes$V1<- n
+
+m<- MH63genes$V9
+m<- gsub(pattern = "g", replacement = "t", x = m, fixed = T)
+MH63genes$V9<- m
+
+MH63newgtf<- MH63genes[,c(1, 9, 4, 5)]
+write.table(MH63newgtf, file="MH63newgff.gff", sep = "\t", row.names = F, col.names = F, quote = F)
+
+# extracts chromosome locations of a list of genes from a GFF object (ParseGFF())
+GetChromLocs<-function(tGFF, qGenes, GeneFeat="gene")
+{
+  AllCords<-NULL
+  for(i in (1:length(tGFF)))
+  {
+    AllCords<-rbind(AllCords,tGFF[[i]][[GeneFeat]])
+  }
+  rmna<-which(is.na(AllCords[,9]))
+  if(length(rmna)>0)
+    AllCords<-AllCords[-rmna,]
+  AllCords<-AllCords[qGenes,]
+  
+  #Sort The Cords by Chr/Start
+  AllCords<-AllCords[order(AllCords[,1],AllCords[,4]),]
+  return(AllCords)
+}
+
+# concatonate files (in terminal)
+cat MH63_MSU.blast ZS97_MSU.blast MH63.blast > all.blast
+cat ~/Indica_genome_files/MH63newgff.gff ~/Indica_genome_files/ZS97newgff.gff ~/Japonica_genome_files/MSU/MSUnewgff.gff > all.gtf
+
+# put all.blast and all.gtf file in same folder (in terminal)
+./MCScanX/MCScanX ./MCScanX_input/all
+
+# match orthologs across all three genomes
+# read in collinearity file
+MCS<-read.table(file = "~/MCScanX_input/all.collinearity", header = F, comment.char = "#", sep = "\t")
+
+# compile data.frame of genes matched in all three genomes
+DriveGroupSynt<-function(MCS)
+{
+  MHhits<-grep(pattern = "MH", x = MCS$V2)
+  MHhits<- MCS[MHhits,]
+  MSUhits<- grep(pattern = "LOC", x = MCS$V2)
+  MSUhits<- MCS[MSUhits,]
+  testMHZS<- grep(pattern = "ZS", x = MHhits$V3)
+  testMHZS<- MHhits[testMHZS,]
+  testMHMSU<- grep(pattern = "LOC", x = MHhits$V3)
+  testMHMSU<- MHhits[testMHMSU,]
+  testMSUZS<- grep(pattern = "ZS", x = MSUhits$V3)
+  testMSUZS<- MSUhits[testMSUZS,]
+  
+  SyntLst<-lapply(1:nrow(testMHMSU),function(x) GroupSynt(testMHMSU[x,],qDF1 = testMHZS,qDF2 = testMSUZS))
+  Nulls<-which(sapply(SyntLst,function(x) is.null(x)))
+  SyntLst<-SyntLst[-Nulls]
+  SyntMat<-do.call(rbind,SyntLst)
+  
+  Sums<-t(apply(SyntMat,1,function(x) as.numeric(c(x[4],x[8],x[12]))))
+  Sums<-apply(Sums,1,sum)
+  
+  SyntMat<-cbind(SyntMat,Sums)
+  
+  MHGroups<-tapply(1:nrow(SyntMat),SyntMat$V2,function(x) SyntMat[x,])
+  SyntMat<-do.call(rbind,lapply(MHGroups,function(x) x[which(x$Sums==min(x$Sums))[1],]))
+  
+  MSUGroups<-tapply(1:nrow(SyntMat),SyntMat$V3,function(x) SyntMat[x,])
+  SyntMat<-do.call(rbind,lapply(MSUGroups,function(x) x[which(x$Sums==min(x$Sums))[1],]))
+  
+  ZSGroups<-tapply(1:nrow(SyntMat),SyntMat$V7,function(x) SyntMat[x,])
+  SyntMat<-do.call(rbind,lapply(ZSGroups,function(x) x[which(x$Sums==min(x$Sums))[1],]))
+  
+  return(SyntMat)
+}
+
+# InDFrow comes from MH->MSU
+# qDF1 is MH->ZS
+# qDF2 is MUS->ZS
+GroupSynt<-function(InDFrow,qDF1,qDF2)
+{
+  inds1<-grep(InDFrow$V2[1],qDF1$V2)
+  inds2<-grep(InDFrow$V3[1],qDF2$V2)
+  if(length(inds1)==0 | length(inds2)==0)
+    return(NULL)
+  
+  indsGrid<-expand.grid(inds1,inds2)
+  geneGrid<-apply(indsGrid,1,function(x) cbind(InDFrow,qDF1[x[1],],qDF2[x[2],]))
+  geneGrid<-do.call(rbind,geneGrid)
+  colnames(geneGrid)<-paste("V",1:ncol(geneGrid),sep="")
+  
+  keeps<-apply(geneGrid,1,function(x) x["V7"]==x["V11"])
+  if(!any(keeps))
+    return(NULL)
+  
+  geneGrid<-geneGrid[which(keeps)[1],]
+  
+  return(geneGrid)
+}
+
+finalsyntenyNEW<- DriveGroupSynt(MCS)
+
